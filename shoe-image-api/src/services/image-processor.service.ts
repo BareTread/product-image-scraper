@@ -26,9 +26,11 @@ export class ImageProcessorService {
 
         let image = sharp(imageBuffer); // By default, sharp does not include EXIF data from the input
 
-    // If Gemini determined the image should be rotated, do that first (90° clockwise)
-    if (geminiResult.rotate) {
-      logger.debug(`Rotating image 90° clockwise as requested by Gemini.`);
+    // Rotate if Gemini requested OR the image is portrait (>20% taller than wide)
+    const metadata = await image.metadata();
+    const needsAutoRotate = !geminiResult.rotate && metadata.width && metadata.height && metadata.height > metadata.width * 1.2;
+    if (geminiResult.rotate || needsAutoRotate) {
+      logger.debug(`Rotating image 90° clockwise${needsAutoRotate ? ' due to portrait aspect ratio' : ' as requested by Gemini'}.`);
       image = image.rotate(90, { background: { r: 255, g: 255, b: 255, alpha: 1 } });
     }
 

@@ -42,6 +42,7 @@ app.post('/api/shoe-image', async (req, res) => {
         model,
         source: result.source,
         rawUrl: result.imageUrl,
+        geminiUrl: result.imageUrl,
         imageUrl: `${req.protocol}://${req.get('host')}${result.localPath}`,
         localPath: result.localPath // Add this line
       });
