@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { GeminiValidationResult } from './gemini-validator.service';
+import { logger } from '../utils/logger'; // Import logger
 
 export class CacheService {
   private cacheDir = path.join(__dirname, '../../public/images');
@@ -66,6 +67,35 @@ export class CacheService {
     this.saveCacheIndex();
 
     return `/images/${filename}`;
+  }
+
+  // Generates a filename for intermediate images.
+  // Example: "Nike Air Max-raw.jpg"
+  private generateIntermediateFilename(normalizedModelKey: string, stage: string): string {
+    const safeStage = stage.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    return `${normalizedModelKey}-${safeStage}.jpg`;
+  }
+
+  // Saves an intermediate image and returns its web path.
+  // These are not added to the main cache index.
+  saveIntermediateImage(
+    modelInput: string, // The original model string from the request
+    stage: string,      // e.g., "raw-download", "gemini-input", "gemini-rejected"
+    imageBuffer: Buffer
+  ): string | null {
+    try {
+      const normalizedModelKey = this.normalizeKey(modelInput);
+      // It's possible geminiResult is not available for very early stages,
+      // so we use normalizedModelKey for a consistent base filename.
+      const filename = this.generateIntermediateFilename(normalizedModelKey, stage);
+      const filepath = path.join(this.cacheDir, filename);
+
+      fs.writeFileSync(filepath, imageBuffer);
+      return `/images/${filename}`;
+    } catch (error: any) {
+      logger.error(`Failed to save intermediate image for model "${modelInput}", stage "${stage}": ${error.message}`);
+      return null;
+    }
   }
 
   private normalizeKey(model: string): string {

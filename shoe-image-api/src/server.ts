@@ -18,6 +18,11 @@ export const app = express();
 const scraper = new ScraperService();
 
 app.use(express.json());
+
+// Serve frontend files from public_frontend (e.g., index.html, css, client-side js)
+app.use(express.static(path.join(__dirname, '../public_frontend')));
+
+// Serve cached images from public/images
 app.use('/images', express.static(path.join(__dirname, '../public/images')));
 
 app.get('/health', (req, res) => {
@@ -34,15 +39,40 @@ app.post('/api/shoe-image', async (req, res) => {
 
     const result = await scraper.getShoeImage(model);
 
-    if (result.success && result.localPath) {
+    // Helper to construct full URLs for local paths
+    const getFullUrl = (localPath: string | null | undefined) => {
+      if (!localPath) return null;
+      return `${req.protocol}://${req.get('host')}${localPath}`;
+    };
+
+    if (result.success && result.finalProcessedPath) {
       res.json({
         success: true,
-        model,
+        model: result.model, // Use model from result as Gemini might refine it
         source: result.source,
-        imageUrl: `${req.protocol}://${req.get('host')}${result.localPath}`
+        // Include all new paths, making them full URLs
+        rawDownloadedPath: getFullUrl(result.rawDownloadedPath),
+        geminiInputPath: getFullUrl(result.geminiInputPath),
+        geminiApprovedRawPath: getFullUrl(result.geminiApprovedRawPath),
+        geminiRejectedPath: getFullUrl(result.geminiRejectedPath),
+        finalProcessedPath: getFullUrl(result.finalProcessedPath), // This is the main image
+        geminiValidationStatus: result.geminiValidationStatus,
+        originalImageUrl: result.originalImageUrl, // The remote URL from where it was scraped
       });
     } else {
-      res.status(404).json({ success: false, model, error: result.error });
+      // Even on failure, return any paths that were populated for debugging
+      res.status(404).json({
+        success: false,
+        model: result.model || model,
+        error: result.error,
+        source: result.source,
+        rawDownloadedPath: getFullUrl(result.rawDownloadedPath),
+        geminiInputPath: getFullUrl(result.geminiInputPath),
+        geminiApprovedRawPath: getFullUrl(result.geminiApprovedRawPath),
+        geminiRejectedPath: getFullUrl(result.geminiRejectedPath),
+        geminiValidationStatus: result.geminiValidationStatus,
+        originalImageUrl: result.originalImageUrl,
+      });
     }
   } catch (error: any) {
     logger.error('An unhandled error occurred in the main endpoint:', error);

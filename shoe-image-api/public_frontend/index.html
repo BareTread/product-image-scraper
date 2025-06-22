@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shoe Image API Frontend</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .container { margin-top: 20px; }
+        .image-stages { display: flex; flex-direction: row; align-items: flex-start; gap: 20px; margin-top: 20px; min-height: 200px; border: 1px solid #eee; padding: 10px;}
+        .stage { display: flex; flex-direction: column; align-items: center; border: 1px solid #ccc; padding: 10px; min-width: 200px; }
+        .stage h3 { margin-top: 0; font-size: 1em; }
+        .stage img { max-width: 200px; max-height: 200px; border: 1px solid #ddd; }
+        .stage p { font-size: 0.9em; color: #555; }
+        #apiResponse { margin-top: 20px; padding: 10px; border: 1px solid #eee; background-color: #f9f9f9; white-space: pre-wrap; word-break: break-all; }
+        #loadingIndicator { font-style: italic; }
+    </style>
+</head>
+<body>
+    <h1>Barefoot Shoe Image Finder</h1>
+    <div class="container">
+        <form id="shoeForm">
+            <label for="shoeModel">Enter Shoe Model:</label>
+            <input type="text" id="shoeModel" name="shoeModel" required size="50">
+            <button type="submit">Get Image</button>
+        </form>
+    </div>
+
+    <div id="loadingIndicator" style="display: none;">Fetching image details...</div>
+
+    <div class="image-stages">
+        <div class="stage" id="rawStage">
+            <h3>1. Raw Downloaded</h3>
+            <img id="rawImage" src="#" alt="Raw Downloaded Image" style="display:none;">
+            <p id="rawImageStatus">Waiting for input...</p>
+        </div>
+        <div class="stage" id="geminiStage">
+            <h3>2. Gemini Input / Output</h3>
+            <img id="geminiInputImage" src="#" alt="Image Sent to Gemini" style="display:none;">
+            <p id="geminiImageStatus">N/A</p>
+            <!-- We might show the same raw image here, or a specific version if Gemini modified/expected something different -->
+            <!-- Or this section could display Gemini's textual analysis -->
+        </div>
+        <div class="stage" id="processedStage">
+            <h3>3. Final Processed</h3>
+            <img id="processedImage" src="#" alt="Final Processed Image" style="display:none;">
+            <p id="processedImageStatus">N/A</p>
+        </div>
+    </div>
+
+    <h2>API Response:</h2>
+    <pre id="apiResponse">Submit a model to see the API response.</pre>
+
+    <script>
+        const shoeForm = document.getElementById('shoeForm');
+        const shoeModelInput = document.getElementById('shoeModel');
+        const apiResponseOutput = document.getElementById('apiResponse');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        const rawImage = document.getElementById('rawImage');
+        const rawImageStatus = document.getElementById('rawImageStatus');
+
+        const geminiInputImage = document.getElementById('geminiInputImage');
+        const geminiImageStatus = document.getElementById('geminiImageStatus');
+
+        const processedImage = document.getElementById('processedImage');
+        const processedImageStatus = document.getElementById('processedImageStatus');
+
+        shoeForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const model = shoeModelInput.value.trim();
+            if (!model) {
+                alert('Please enter a shoe model.');
+                return;
+            }
+
+            // Reset UI
+            loadingIndicator.style.display = 'block';
+            apiResponseOutput.textContent = '';
+
+            rawImage.style.display = 'none';
+            rawImage.src = '#';
+            rawImageStatus.textContent = 'Fetching...';
+
+            geminiInputImage.style.display = 'none';
+            geminiInputImage.src = '#';
+            geminiImageStatus.textContent = 'N/A';
+
+            processedImage.style.display = 'none';
+            processedImage.src = '#';
+            processedImageStatus.textContent = 'N/A';
+
+            try {
+                const response = await fetch('/api/shoe-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ model: model }),
+                });
+
+                const data = await response.json();
+                apiResponseOutput.textContent = JSON.stringify(data, null, 2);
+
+                if (data.success) {
+                    // Assuming the API response will be augmented with these fields
+                    // For now, 'imageUrl' from the original API spec might be the final one.
+                    // And 'localPath' might be usable if served statically.
+                    // The key 'imageUrl' in current API seems to be the final public URL.
+                    // Backend now returns finalProcessedPath, rawDownloadedPath, geminiInputPath, etc.
+
+                    let finalProcessedPath = data.finalProcessedPath || null;
+                    let rawDownloadedPath = data.rawDownloadedPath || null;
+                    let geminiInputPath = data.geminiInputPath || rawDownloadedPath; // Default Gemini input to raw if specific not given
+                    // Potentially show geminiRejectedPath if status is 'rejected' and path exists
+                    if (data.geminiValidationStatus === 'rejected' && data.geminiRejectedPath) {
+                        geminiInputPath = data.geminiRejectedPath; // Show the rejected image in Gemini slot
+                    } else if (data.geminiValidationStatus === 'approved' && data.geminiApprovedRawPath) {
+                        geminiInputPath = data.geminiApprovedRawPath; // Show the one that was approved before processing
+                    }
+
+
+                    if (rawDownloadedPath) {
+                        rawImage.src = rawDownloadedPath;
+                        rawImage.style.display = 'block';
+                        rawImageStatus.textContent = 'Downloaded image.';
+                    } else {
+                        rawImageStatus.textContent = 'Raw image not available.';
+                    }
+
+                    // Displaying Gemini's input image (often the raw one)
+                    if (geminiInputPath) {
+                        geminiInputImage.src = geminiInputPath;
+                        geminiInputImage.style.display = 'block';
+                        if (data.geminiValidationStatus === 'rejected') {
+                             geminiImageStatus.textContent = `Gemini Input. Status: Rejected.`;
+                        } else if (data.geminiValidationStatus === 'bypassed') {
+                            geminiImageStatus.textContent = `Gemini Input. Status: Bypassed.`;
+                        } else if (data.geminiValidationStatus === 'approved' || data.success) { // Assuming success implies Gemini approved or was bypassed successfully
+                            geminiImageStatus.textContent = `Gemini Input. Status: Approved.`;
+                        } else {
+                            geminiImageStatus.textContent = 'Gemini input/status not specified.';
+                        }
+                    } else {
+                        geminiImageStatus.textContent = 'Gemini input image not available.';
+                    }
+
+                    if (finalProcessedPath) {
+                        processedImage.src = finalProcessedPath;
+                        processedImage.style.display = 'block';
+                        processedImageStatus.textContent = 'Final processed image.';
+                    } else {
+                        processedImageStatus.textContent = 'Final image not available.';
+                    }
+
+                } else {
+                    rawImageStatus.textContent = `Error: ${data.error || 'Failed to fetch'}`;
+                    geminiImageStatus.textContent = `Error: ${data.error || 'Failed to fetch'}`;
+                    processedImageStatus.textContent = `Error: ${data.error || 'Failed to fetch'}`;
+                }
+
+            } catch (error) {
+                console.error('Error fetching shoe image:', error);
+                apiResponseOutput.textContent = `Error: ${error.message}`;
+                rawImageStatus.textContent = `Error: ${error.message}`;
+                geminiImageStatus.textContent = `Error: ${error.message}`;
+                processedImageStatus.textContent = `Error: ${error.message}`;
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

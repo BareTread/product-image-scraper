@@ -37,11 +37,22 @@ export class ScraperService {
 
   async getShoeImage(model: string): Promise<ScrapingResult> {
     logger.info(`Processing request for: ${model}`);
+    const result: ScrapingResult = { // Initialize with model
+        success: false,
+        model: model,
+        geminiValidationStatus: 'n/a',
+    };
 
     const cachedPath = this.cache.getCachedImage(model);
     if (cachedPath) {
       logger.info(`Cache hit for "${model}". Returning cached image.`);
-      return { success: true, localPath: cachedPath, source: 'cache' };
+      result.success = true;
+      result.finalProcessedPath = cachedPath;
+      result.source = 'cache';
+      // For cached images, we don't have intermediate steps to show in this flow
+      // but we could consider storing them if needed in future.
+      // For now, only final path is available from cache.
+      return result;
     }
 
     logger.info(`No cache entry for "${model}". Starting scrape using ${this.source.name}...`);
@@ -68,56 +79,85 @@ export class ScraperService {
     model: string,
     sourceName: string
   ): Promise<ScrapingResult> {
+    const scrapingResult: ScrapingResult = {
+      success: false,
+      model: model,
+      originalImageUrl: url,
+      source: sourceName,
+      geminiValidationStatus: 'n/a', // Default status
+    };
     let currentDelay = this.downloadInitialDelayMs;
 
     for (let attempt = 1; attempt <= this.downloadMaxRetries; attempt++) {
       try {
-        logger.debug(`Attempt ${attempt}/${this.downloadMaxRetries} to download ${url}`);
+        logger.debug(`Attempt ${attempt}/${this.downloadMaxRetries} to download ${url} for model "${model}"`);
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: this.downloadTimeoutMs,
           headers: { 'User-Agent': this.userAgent }
         });
         const imageBuffer = Buffer.from(response.data);
+        scrapingResult.rawDownloadedPath = this.cache.saveIntermediateImage(model, 'raw-download', imageBuffer);
+        // Initially, the image input for Gemini is the raw downloaded one. This might change if basic validation modifies the buffer.
+        scrapingResult.geminiInputPath = scrapingResult.rawDownloadedPath;
 
         const borderOk = await this.validator.validateImage(imageBuffer);
         if (!borderOk) {
           logger.debug(`Image from ${url} failed basic validation.`);
-          // No retry for validation failure, it's not a transient error
-          return { success: false, error: 'Image failed basic validation' };
+          scrapingResult.error = 'Image failed basic validation';
+          // Optionally save this failed image:
+          // this.cache.saveIntermediateImage(model, 'basic-validation-failed', imageBuffer);
+          return scrapingResult; // Return the partially filled scrapingResult
         }
+        // If validator could modify the buffer, we might save another intermediate version here:
+        // scrapingResult.postBasicValidationPath = this.cache.saveIntermediateImage(model, 'post-basic-validation', imageBuffer);
+        // scrapingResult.geminiInputPath = scrapingResult.postBasicValidationPath;
+
 
         // Second-tier validation with Gemini (semantic check)
-        let geminiResult;
-        const geminiMaxRetries = config.scraperService.geminiMaxRetries ?? 2; // Default to 2 if not in config
-        const geminiInitialDelayMs = config.scraperService.geminiInitialDelayMs ?? 1000; // Default to 1s
+        // Second-tier validation with Gemini (semantic check)
+        let actualGeminiResult: GeminiValidationResult | null = null; // Stores the result from geminiValidator or the dummy bypass result
+        const geminiMaxRetries = config.scraperService.geminiMaxRetries ?? 2;
+        const geminiInitialDelayMs = config.scraperService.geminiInitialDelayMs ?? 1000;
         let geminiCurrentDelay = geminiInitialDelayMs;
 
         for (let geminiAttempt = 1; geminiAttempt <= geminiMaxRetries; geminiAttempt++) {
           try {
             logger.debug(`Attempt ${geminiAttempt}/${geminiMaxRetries} for Gemini validation of image from ${url}`);
-            geminiResult = await this.geminiValidator.validateImage(imageBuffer, model);
-            if (geminiResult) {
-              break; // Success, exit retry loop
+            // imageBuffer here is the one that passed basic validation
+            actualGeminiResult = await this.geminiValidator.validateImage(imageBuffer, model);
+
+            if (actualGeminiResult) {
+              scrapingResult.geminiValidationStatus = 'approved';
+              // Save the version of the image that Gemini approved.
+              scrapingResult.geminiApprovedRawPath = this.cache.saveIntermediateImage(model, 'gemini-approved-raw', imageBuffer);
+              // The input to Gemini was the current imageBuffer
+              scrapingResult.geminiInputPath = scrapingResult.geminiApprovedRawPath; // Or keep the earlier geminiInputPath if it wasn't modified by basic validation
+              logger.info(`Gemini approved image for "${model}" from ${url}.`);
+              break; // Success from Gemini
             } else {
               // Gemini explicitly rejected the image (e.g., not a shoe)
-              logger.debug(`Gemini validation attempt ${geminiAttempt}/${geminiMaxRetries} rejected image from ${url}. Not retrying for this reason.`);
-              // This is not a transient error, so break and let it be handled as LLM validation failed.
-              // Or, we could return immediately: return { success: false, error: 'LLM validation failed (rejected)' };
-              // For now, breaking will lead to the check after the loop.
-              break;
+              scrapingResult.geminiValidationStatus = 'rejected';
+              logger.debug(`Gemini validation attempt ${geminiAttempt}/${geminiMaxRetries} rejected image from ${url}.`);
+              scrapingResult.geminiRejectedPath = this.cache.saveIntermediateImage(model, 'gemini-rejected', imageBuffer);
+              actualGeminiResult = null; // Ensure it's null if rejected
+              break; // Exit retry loop, Gemini has made a decision
             }
           } catch (geminiError: any) {
             logger.warn(`Gemini validation attempt ${geminiAttempt}/${geminiMaxRetries} for ${url} failed: ${geminiError.message}`);
-            if (geminiAttempt === geminiMaxRetries) {
-              // All retries failed
-              if (config.scraperService.bypassGeminiOnFailure) { // Configurable bypass
+            if (geminiAttempt === geminiMaxRetries) { // Last attempt
+              if (config.scraperService.bypassGeminiOnFailure) {
                 logger.warn(`All Gemini validation attempts for ${url} failed. Bypassing Gemini validation as per configuration.`);
-                geminiResult = { model: model, entities: [], themes: [], isShoe: true, shoeType: 'unknown (Gemini bypassed)' }; // Create a dummy success result
-                break;
+                scrapingResult.geminiValidationStatus = 'bypassed';
+                actualGeminiResult = { model: model, brand: 'Unknown (Bypassed)', entities: [], themes: [], isShoe: true, shoeType: 'unknown (Gemini bypassed)' };
+                // Save the image that was attempted with Gemini, even if bypassed
+                scrapingResult.geminiInputPath = this.cache.saveIntermediateImage(model, 'gemini-bypassed-input', imageBuffer);
+                break; // Exit retry loop, bypassed
               } else {
                 logger.error(`All Gemini validation attempts for ${url} failed. Not bypassing.`);
-                return { success: false, error: `LLM validation failed after ${geminiMaxRetries} attempts: ${geminiError.message}` };
+                scrapingResult.error = `LLM validation failed after ${geminiMaxRetries} attempts: ${geminiError.message}`;
+                scrapingResult.geminiValidationStatus = 'failed_to_validate';
+                return scrapingResult; // Return the partially filled scrapingResult
               }
             }
             await new Promise(resolve => setTimeout(resolve, geminiCurrentDelay));
@@ -125,20 +165,45 @@ export class ScraperService {
           }
         }
 
-        if (!geminiResult) {
-          logger.debug(`Gemini ultimately rejected image from ${url} or all attempts failed.`);
-          return { success: false, error: 'LLM validation failed' };
+        // After the loop, check the outcome
+        if (!actualGeminiResult) { // Handles explicit rejection if bypass is off
+            logger.debug(`Gemini ultimately rejected image from ${url} and was not bypassed, or another failure occurred.`);
+            scrapingResult.error = scrapingResult.error || 'LLM validation failed (Gemini rejected or failed and bypass off)';
+            // scrapingResult.geminiRejectedPath should be set if it was an explicit rejection
+            return scrapingResult;
         }
 
-        // Process the image to make it unique for SEO
-        // Assuming image processing errors are not typically transient
-        const processedBuffer = await this.imageProcessor.makeUnique(imageBuffer, geminiResult);
+        // If Gemini rejected (status is 'rejected') but we are here, it means bypass must have been true (though this path might be less common with current logic)
+        // or if actualGeminiResult.isShoe is false from a successful call.
+        // We must ensure that if it's 'rejected' and bypass is OFF, we don't proceed.
+        if (scrapingResult.geminiValidationStatus === 'rejected' && !config.scraperService.bypassGeminiOnFailure) {
+             logger.debug(`Gemini rejected image from ${url} and bypass is OFF. Cannot proceed.`);
+             scrapingResult.error = scrapingResult.error || 'LLM validation failed (Gemini rejected and bypass is off)';
+             return scrapingResult;
+        }
+        // Also, if Gemini successfully said it's not a shoe, and it wasn't a bypass scenario
+        if (actualGeminiResult && !actualGeminiResult.isShoe && scrapingResult.geminiValidationStatus === 'approved') {
+            logger.debug(`Gemini approved the call, but classified image as not a shoe for ${url}.`);
+            scrapingResult.geminiValidationStatus = 'rejected'; // Correct status
+            scrapingResult.geminiRejectedPath = scrapingResult.geminiApprovedRawPath; // The 'approved' one was actually a rejection content-wise
+            scrapingResult.geminiApprovedRawPath = null; // Nullify this
+            scrapingResult.error = 'LLM validation: Image is not a shoe.';
+            return scrapingResult;
+        }
 
-        const localPath = this.cache.saveImage(geminiResult, processedBuffer);
+
+        // Process the image to make it unique for SEO using actualGeminiResult (could be dummy if bypassed)
+        const processedBuffer = await this.imageProcessor.makeUnique(imageBuffer, actualGeminiResult);
+        // Save the final processed image
+        scrapingResult.finalProcessedPath = this.cache.saveImage(actualGeminiResult, processedBuffer);
+
+        scrapingResult.success = true;
+        // Update model from Gemini result if it refined it (e.g. from bypass or actual result)
+        scrapingResult.model = actualGeminiResult.model;
         logger.info(
-          `SUCCESS: Valid image for "${geminiResult.model}" (matched as "${geminiResult.model}") found via ${sourceName} and cached at ${localPath}.`
+          `SUCCESS: Valid image for "${scrapingResult.model}" found via ${sourceName} and cached at ${scrapingResult.finalProcessedPath}. Gemini status: ${scrapingResult.geminiValidationStatus}`
         );
-        return { success: true, imageUrl: url, localPath, source: sourceName };
+        return scrapingResult;
 
       } catch (error: any) {
         let errorMessage = error.message;
@@ -159,10 +224,12 @@ export class ScraperService {
         }
 
         logger.warn(`Attempt ${attempt}/${this.downloadMaxRetries} for ${url} failed: ${errorMessage}`);
+        scrapingResult.error = errorMessage; // Store the last error message
 
         if (attempt === this.downloadMaxRetries) {
           logger.error(`All ${this.downloadMaxRetries} attempts to download/process ${url} failed. Last error: ${errorMessage}`);
-          return { success: false, error: `Failed to download and process image from ${url} after ${this.downloadMaxRetries} attempts: ${errorMessage}` };
+          scrapingResult.error = `Failed to download and process image from ${url} after ${this.downloadMaxRetries} attempts: ${errorMessage}`;
+          return scrapingResult; // Return the populated scrapingResult with error
         }
 
         // Only retry for potentially transient errors (e.g., network issues, timeouts).
@@ -177,6 +244,7 @@ export class ScraperService {
     }
     // Should be unreachable due to the return inside the loop on maxRetries
     logger.error(`Exhausted retries for ${url}, but loop finished unexpectedly.`);
-    return { success: false, error: `Failed to download image from ${url} after ${this.downloadMaxRetries} attempts (unexpected loop exit).` };
+    scrapingResult.error = `Failed to download image from ${url} after ${this.downloadMaxRetries} attempts (unexpected loop exit).`;
+    return scrapingResult;
   }
 }
