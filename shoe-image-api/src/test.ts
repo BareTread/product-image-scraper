@@ -4,13 +4,13 @@ const BASE_PORT = srv ? (srv.address() as any).port : 3000;
 import axios from 'axios';
 
 const testModels = [
-  'Vivobarefoot Primus Lite III', // Vivobarefoot
-  'Xero Shoes Prio',              // Xero Shoes
-  'Be Lenka Trailwalker',         // Be Lenka
-  'Joe Nimble nimbleToes',          // Joe Nimble
-  'Lems Primal 3',                // Lems
-  'Merrell Vapor Glove 6',        // Merrell Barefoot line
-  'Topo Athletic ST-5'            // Topo Athletic
+  'Freet Tanga',                  // Freet Footwear
+  'Feelgrounds Original Knit',    // Feelgrounds
+  'Vibram FiveFingers KSO EVO',   // Vibram
+  'Softstar Primal RunAmoc',      // Softstar Shoes
+  'Groundies Universe',           // Groundies
+  'Splay Freestyle',              // Splay Athletics
+  'Whitin Barefoot Cross-Trainer' // Whitin
 ];
 
 async function runTests() {

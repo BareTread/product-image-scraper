@@ -22,7 +22,9 @@ export class GeminiValidatorService {
     try {
       const model = this.geminiClient.getGenerativeModel({ model: "gemini-1.5-flash" });
       const base64 = imageBuffer.toString("base64");
-      const prompt = `You are an expert product-image inspector. Reply ONLY with valid JSON {\"valid\":true} or {\"valid\":false}. Is this a studio product photo of the model \"${shoeModel}\" on a white background? Reply false if any doubt.`;
+      const prompt = `You are an e-commerce image quality inspector. A COVER photo must clearly show the SIDE or ANGLED view of the shoe’s upper. Images that show ONLY the bottom outsole or flat tread pattern are NOT usable and must be rejected.
+
+An image is USABLE if ALL of these are true: An image is USABLE if ALL of these are true:\n1. Shows exactly ONE shoe (no pairs laid next to each other, no people).\n2. The shoe clearly matches the model \"${shoeModel}\" (brand + style).\n3. Clean plain or pure-white background with no props, text, or clutter.\n4. Entire shoe is visible, not cropped.\n\nRespond with JSON ONLY in the form {\"usable\":true} or {\"usable\":false}. Do NOT output anything else.`;
 
       const result = await model.generateContent({
         contents: [
@@ -46,7 +48,7 @@ export class GeminiValidatorService {
         return false;
       }
       const json = JSON.parse(match[0]);
-      return json.valid === true;
+      return json.usable === true;
     } catch (err) {
       logger.error("Gemini validation error:", err);
       return false;
