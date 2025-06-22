@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+
+# Cached images (we only want the directory structure)
+public/images/*
+!public/images/.gitkeep
+
+# Logs and editor files
+*.log
+.DS_Store
