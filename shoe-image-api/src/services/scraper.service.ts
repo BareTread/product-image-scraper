@@ -3,6 +3,7 @@ import { ImageSource, ScrapingResult } from '../types';
 import { CacheService } from './cache.service';
 import { ValidatorService } from './validator.service';
 import { GeminiValidatorService } from './gemini-validator.service';
+import { ImageProcessorService } from './image-processor.service';
 import { SearchEngineSource } from '../sources/search.source';
 import { logger } from '../utils/logger';
 
@@ -10,13 +11,15 @@ export class ScraperService {
   private source: ImageSource;
   private cache: CacheService;
   private validator: ValidatorService;
-  private geminiValidator: GeminiValidatorService;
+    private geminiValidator: GeminiValidatorService;
+  private imageProcessor: ImageProcessorService;
 
   constructor() {
     this.source = new SearchEngineSource();
     this.cache = new CacheService();
     this.validator = new ValidatorService();
-    this.geminiValidator = new GeminiValidatorService();
+        this.geminiValidator = new GeminiValidatorService();
+    this.imageProcessor = new ImageProcessorService();
   }
 
   async getShoeImage(model: string): Promise<ScrapingResult> {
@@ -63,14 +66,25 @@ export class ScraperService {
       }
 
       // Second-tier validation with Gemini (semantic check)
-      const semanticOk = await this.geminiValidator.validateImage(imageBuffer, model);
-      if (!semanticOk) {
+            const geminiResult = await this.geminiValidator.validateImage(
+        imageBuffer,
+        model
+      );
+            if (!geminiResult) {
         logger.debug(`Gemini rejected image from ${url}`);
         return { success: false, error: 'LLM validation failed' };
       }
 
-      const localPath = this.cache.saveImage(model, imageBuffer);
-      logger.info(`SUCCESS: Valid image for "${model}" found via ${sourceName} and cached.`);
+            // Process the image to make it unique for SEO
+            const processedBuffer = await this.imageProcessor.makeUnique(
+        imageBuffer,
+        geminiResult
+      );
+
+            const localPath = this.cache.saveImage(geminiResult, processedBuffer);
+            logger.info(
+        `SUCCESS: Valid image for "${geminiResult.model}" found via ${sourceName} and cached.`
+      );
       return { success: true, imageUrl: url, localPath, source: sourceName };
     } catch (error: any) {
       logger.debug(`Failed to download or process ${url}: ${error.message}`);

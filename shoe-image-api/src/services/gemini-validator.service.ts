@@ -1,5 +1,55 @@
-import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  HarmBlockThreshold,
+  HarmCategory,
+  GenerateContentRequest,
+  GenerativeModel,
+  GenerateContentResult,
+  GenerationConfig,
+} from "@google/generative-ai";
 import { logger } from "../utils/logger";
+
+const GEMINI_TIMEOUT_MS = 15000; // 15 seconds
+
+/**
+ * Wraps a Gemini API call with a timeout.
+ * @param model The GenerativeModel instance.
+ * @param request The content generation request.
+ * @param timeout The timeout in milliseconds.
+ * @returns A promise that resolves with the generation result or rejects on timeout.
+ */
+/**
+ * Represents the structured data we expect back from the Gemini API.
+ */
+export interface GeminiValidationResult {
+  usable: boolean;
+  brand: string;
+  model: string;
+  keywords: string[];
+}
+
+function generateContentWithTimeout(
+  model: GenerativeModel,
+  request: GenerateContentRequest,
+  timeout: number
+): Promise<GenerateContentResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Gemini API call timed out after ${timeout}ms`));
+    }, timeout);
+
+    model.generateContent(request).then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 /**
  * GeminiValidatorService uses Google Generative-AI "gemini-1.5-flash" (Vision)
@@ -11,47 +61,76 @@ import { logger } from "../utils/logger";
 export class GeminiValidatorService {
   private geminiClient: GoogleGenerativeAI;
 
-  constructor(private readonly apiKey: string | undefined = process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    constructor(
+    private readonly apiKey: string | undefined = process.env.GOOGLE_GENERATIVE_AI_API_KEY
+  ) {
     if (!apiKey) {
       throw new Error("GOOGLE_GENERATIVE_AI_API_KEY not set in environment");
     }
     this.geminiClient = new GoogleGenerativeAI(apiKey);
   }
 
-  async validateImage(imageBuffer: Buffer, shoeModel: string): Promise<boolean> {
+    async validateImage(
+    imageBuffer: Buffer,
+    shoeModel: string
+  ): Promise<GeminiValidationResult | null> {
     try {
       const model = this.geminiClient.getGenerativeModel({ model: "gemini-1.5-flash" });
       const base64 = imageBuffer.toString("base64");
-      const prompt = `You are an e-commerce image quality inspector. A COVER photo must clearly show the SIDE or ANGLED view of the shoe’s upper. Images that show ONLY the bottom outsole or flat tread pattern are NOT usable and must be rejected.
+            const prompt = `You are an e-commerce image quality inspector for a barefoot shoe store called "BareTread". Analyze the image of a "${shoeModel}".
 
-An image is USABLE if ALL of these are true: An image is USABLE if ALL of these are true:\n1. Shows exactly ONE shoe (no pairs laid next to each other, no people).\n2. The shoe clearly matches the model \"${shoeModel}\" (brand + style).\n3. Clean plain or pure-white background with no props, text, or clutter.\n4. Entire shoe is visible, not cropped.\n\nRespond with JSON ONLY in the form {\"usable\":true} or {\"usable\":false}. Do NOT output anything else.`;
+A COVER photo must clearly show the SIDE or ANGLED view of the shoe’s upper. Images that show ONLY the bottom outsole or a flat tread pattern are NOT usable.
 
-      const result = await model.generateContent({
+Evaluate the following criteria:
+1.  **Usability**: Is it a usable cover photo? (boolean)
+2.  **Brand**: What is the brand name? (e.g., "Vivobarefoot", "Xero Shoes")
+3.  **Model**: What is the specific model name? (e.g., "Primus Lite III")
+4.  **Keywords**: Provide 3-5 relevant SEO keywords, including the brand and model.
+
+Respond with a single, minified JSON object matching the requested schema.`;
+
+            const generationConfig: GenerationConfig = {
+        responseMimeType: 'application/json',
+        temperature: 0.2,
+      };
+
+      const request: GenerateContentRequest = {
         contents: [
           {
             role: "user",
             parts: [
               { inlineData: { data: base64, mimeType: "image/jpeg" } },
-              { text: prompt }
-            ]
-          }
+              { text: prompt },
+            ],
+          },
         ],
         safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
-        ]
-      });
+          {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+        ],
+      };
 
-      const text = result.response.text();
-      const match = text.match(/\{[\s\S]*?\}/);
-      if (!match) {
-        logger.debug("Gemini response did not contain JSON – failing validation");
-        return false;
+            const result = await generateContentWithTimeout(
+        model,
+        { ...request, generationConfig },
+        GEMINI_TIMEOUT_MS
+      );
+
+            const json = JSON.parse(result.response.text()) as GeminiValidationResult;
+
+      if (!json.usable) {
+        logger.debug(`Gemini rejected image for "${shoeModel}" as not usable.`);
+        return null;
       }
-      const json = JSON.parse(match[0]);
-      return json.usable === true;
-    } catch (err) {
-      logger.error("Gemini validation error:", err);
-      return false;
+
+      // Return the full structured data object
+      return json;
+    } catch (err: any) {
+            // Log the specific error, including our custom timeout error
+            logger.error(`Gemini validation error: ${err.message}`);
+      return null;
     }
   }
 }

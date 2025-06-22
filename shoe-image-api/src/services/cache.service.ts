@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { GeminiValidationResult } from './gemini-validator.service';
 
 export class CacheService {
   private cacheDir = path.join(__dirname, '../../public/images');
@@ -31,6 +32,15 @@ export class CacheService {
     fs.writeFileSync(indexPath, JSON.stringify(data, null, 2));
   }
 
+  private generateSeoFilename(geminiResult: GeminiValidationResult): string {
+    const { brand, model } = geminiResult;
+    const slug = `${brand} ${model} side view`
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+    return `${slug}.jpg`;
+  }
+
   getCachedImage(model: string): string | null {
     const key = this.normalizeKey(model);
     const filename = this.cacheIndex.get(key);
@@ -42,13 +52,16 @@ export class CacheService {
     return null;
   }
 
-  saveImage(model: string, imageBuffer: Buffer): string {
-    const key = this.normalizeKey(model);
-    const hash = crypto.createHash('md5').update(key).digest('hex').substring(0, 8);
-    const filename = `${key}_${hash}.jpg`;
+  saveImage(
+    geminiResult: GeminiValidationResult,
+    imageBuffer: Buffer
+  ): string {
+    const filename = this.generateSeoFilename(geminiResult);
     const filepath = path.join(this.cacheDir, filename);
 
     fs.writeFileSync(filepath, imageBuffer);
+
+    const key = this.normalizeKey(geminiResult.model);
     this.cacheIndex.set(key, filename);
     this.saveCacheIndex();
 

@@ -50,19 +50,21 @@ app.post('/api/shoe-image', async (req, res) => {
   }
 });
 
-export function startServer(port: number | string = config.port) {
-  const listenPort: number = typeof port === "string" ? parseInt(port, 10) : port;
-  try {
-    return app.listen(listenPort, () => {
-      logger.info(`Server running on http://localhost:${listenPort}`);
+import type { Server } from 'http';
+
+export function startServer(port: number | string = config.port, onListen?: () => void): Server {
+  const listenPort: number = typeof port === 'string' ? parseInt(port, 10) : port;
+
+  const server: Server = app.listen(listenPort, () => {
+      if (process.env.NODE_ENV !== 'test') {
+        const address = server.address();
+        const port = typeof address === 'string' ? address : address?.port;
+        logger.info(`Server running on http://localhost:${port}`);
+      }
+      onListen?.();
     });
-  } catch (err: any) {
-    if (err.code === "EADDRINUSE") {
-      logger.error(`Port ${listenPort} already in use, reusing existing server.`);
-      return null;
-    }
-    throw err;
-  }
+
+  return server;
 }
 
 // If executed directly (not imported), start immediately
