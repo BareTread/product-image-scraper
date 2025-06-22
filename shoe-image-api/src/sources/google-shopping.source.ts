@@ -1,6 +1,15 @@
 import { Page } from '@browserbasehq/stagehand';
 import { Mutex } from 'async-mutex';
 import { BrowserFactory } from './browser.factory';
+import { config } from '../config';
+
+const humanPause = async () => {
+  const hd: any = (config.stagehand.localBrowserLaunchOptions as any).humanDelay;
+  if (!hd) return;
+  const { minMs = 100, maxMs = 300 } = hd;
+  const ms = minMs + Math.random() * (maxMs - minMs);
+  await new Promise(r => setTimeout(r, ms));
+};
 import { ImageSource } from '../types';
 import { logger } from '../utils/logger';
 
@@ -28,15 +37,17 @@ export class GoogleShoppingSource implements ImageSource {
 
   async searchImage(query: string): Promise<string[]> {
     return this.withLock(async () => {
-            const page = this.browserFactory.getBrowserPage();
+            const page = await this.browserFactory.getBrowserPage();
       try {
         const shoppingUrl = `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query)}`;
         logger.debug(`Navigating to Google Shopping: ${shoppingUrl}`);
         await page.goto(shoppingUrl);
+await humanPause();
 
         logger.debug('Waiting for shopping results to load...');
         // This selector targets the container for an individual shopping result.
         await page.waitForSelector('.sh-dgr__content', { timeout });
+await humanPause();
 
         logger.debug('Extracting image URLs from shopping results...');
         const imageUrls = await page.evaluate(() => {

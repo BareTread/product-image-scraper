@@ -18,6 +18,8 @@ export const app = express();
 const scraper = new ScraperService();
 
 app.use(express.json());
+// Serve frontend assets
+app.use(express.static(path.join(__dirname, '../public_frontend')));
 app.use('/images', express.static(path.join(__dirname, '../public/images')));
 
 app.get('/health', (req, res) => {

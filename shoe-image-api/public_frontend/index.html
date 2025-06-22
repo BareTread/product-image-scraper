@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shoe Image Debugger</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    h1 { margin-top: 0; }
+    form { margin-bottom: 20px; }
+    label { font-weight: bold; margin-right: 10px; }
+    .grid { display: flex; gap: 20px; }
+    .col { flex: 1; text-align: center; }
+    .col img { max-width: 100%; border: 1px solid #ccc; }
+    pre { background: #f9f9f9; padding: 10px; overflow-x: auto; max-height: 300px; }
+  </style>
+</head>
+<body>
+  <h1>Shoe Image Processing Debugger</h1>
+  <form id="imgForm">
+    <label for="model">Shoe model:</label>
+    <input type="text" id="model" name="model" required />
+    <button type="submit">Fetch</button>
+  </form>
+
+  <div class="grid">
+    <div class="col">
+      <h3>Raw Downloaded</h3>
+      <img id="rawImg" alt="Raw" />
+    </div>
+    <div class="col">
+      <h3>Gemini</h3>
+      <img id="geminiImg" alt="Gemini" />
+    </div>
+    <div class="col">
+      <h3>Processed</h3>
+      <img id="processedImg" alt="Processed" />
+    </div>
+  </div>
+
+  <h3>API Response</h3>
+  <pre id="responseBox">Waiting...</pre>
+
+  <script>
+    const form = document.getElementById('imgForm');
+    const rawImg = document.getElementById('rawImg');
+    const geminiImg = document.getElementById('geminiImg');
+    const processedImg = document.getElementById('processedImg');
+    const respBox = document.getElementById('responseBox');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const model = document.getElementById('model').value.trim();
+      if (!model) return;
+      respBox.textContent = 'Loading...';
+      [rawImg, geminiImg, processedImg].forEach(img => img.src = '');
+
+      try {
+        const res = await fetch('/api/shoe-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model })
+        });
+        const data = await res.json();
+        respBox.textContent = JSON.stringify(data, null, 2);
+        if (data.rawUrl) rawImg.src = data.rawUrl;
+        if (data.geminiUrl) geminiImg.src = data.geminiUrl;
+        if (data.imageUrl) processedImg.src = data.imageUrl;
+      } catch (err) {
+        respBox.textContent = 'Error: ' + err;
+      }
+    });
+  </script>
+</body>
+</html>

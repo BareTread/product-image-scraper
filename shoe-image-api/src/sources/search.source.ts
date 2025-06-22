@@ -3,6 +3,15 @@ import { ImageSource } from '../types';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
+// --- Human-like random delay helper ---
+const humanPause = async () => {
+  const hd: any = (config.stagehand.localBrowserLaunchOptions as any).humanDelay;
+  if (!hd) return;
+  const { minMs = 100, maxMs = 300 } = hd;
+  const ms = minMs + Math.random() * (maxMs - minMs);
+  await new Promise(r => setTimeout(r, ms));
+};
+
 export class SearchEngineSource implements ImageSource {
   name = 'search-engine';
   priority = 1; // single source
@@ -59,10 +68,13 @@ export class SearchEngineSource implements ImageSource {
 
       logger.debug('Navigating to Bing Images...');
             await page.goto('https://www.bing.com/images/search', { timeout });
+await humanPause();
 
       logger.debug(`Searching for: ${query}`);
                   await page.act(`type "${query}" in the search bar`);
+await humanPause();
                   await page.act('press Enter');
+await humanPause();
 
       logger.debug('Waiting for image results to load...');
       // Wait for the image results container to ensure images are loaded.

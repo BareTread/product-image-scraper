@@ -1,4 +1,5 @@
 import { Stagehand, Page } from '@browserbasehq/stagehand';
+import { config } from '../config';
 
 let instance: BrowserFactory | null = null;
 
@@ -7,7 +8,8 @@ export class BrowserFactory {
 
 
   private constructor() {
-            this.stagehand = new Stagehand({ env: 'LOCAL', verbose: 2 });
+    // Pass full configuration (including stealth flags) to Stagehand
+    this.stagehand = new Stagehand(config.stagehand);
   }
 
   public static getInstance(): BrowserFactory {
@@ -25,7 +27,13 @@ export class BrowserFactory {
     await this.stagehand.close();
   }
 
-  public getBrowserPage(): Page {
+  private initialized = false;
+
+  public async getBrowserPage(): Promise<Page> {
+    if (!this.initialized) {
+      await this.stagehand.init();
+      this.initialized = true;
+    }
     return this.stagehand.page;
   }
 }

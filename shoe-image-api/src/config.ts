@@ -13,7 +13,16 @@ export const config = {
     },
     localBrowserLaunchOptions: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      stealth: true,
+      humanDelay: { minMs: 200, maxMs: 600 },
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--lang=en-US,en',
+        '--window-size=1280,800',
+      ]
     },
   },
   retailers: {
