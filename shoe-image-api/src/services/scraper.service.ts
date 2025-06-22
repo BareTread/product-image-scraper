@@ -2,6 +2,7 @@ import axios from 'axios';
 import { ImageSource, ScrapingResult } from '../types';
 import { CacheService } from './cache.service';
 import { ValidatorService } from './validator.service';
+import { GeminiValidatorService } from './gemini-validator.service';
 import { SearchEngineSource } from '../sources/search.source';
 import { logger } from '../utils/logger';
 
@@ -9,11 +10,13 @@ export class ScraperService {
   private source: ImageSource;
   private cache: CacheService;
   private validator: ValidatorService;
+  private geminiValidator: GeminiValidatorService;
 
   constructor() {
     this.source = new SearchEngineSource();
     this.cache = new CacheService();
     this.validator = new ValidatorService();
+    this.geminiValidator = new GeminiValidatorService();
   }
 
   async getShoeImage(model: string): Promise<ScrapingResult> {
@@ -52,11 +55,18 @@ export class ScraperService {
       });
       const imageBuffer = Buffer.from(response.data);
 
-      const isValid = await this.validator.validateImage(imageBuffer);
+      const borderOk = await this.validator.validateImage(imageBuffer);
 
-      if (!isValid) {
+      if (!borderOk) {
         logger.debug(`Image from ${url} failed validation.`);
         return { success: false, error: 'Image failed validation' };
+      }
+
+      // Second-tier validation with Gemini (semantic check)
+      const semanticOk = await this.geminiValidator.validateImage(imageBuffer, model);
+      if (!semanticOk) {
+        logger.debug(`Gemini rejected image from ${url}`);
+        return { success: false, error: 'LLM validation failed' };
       }
 
       const localPath = this.cache.saveImage(model, imageBuffer);

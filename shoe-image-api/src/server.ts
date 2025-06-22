@@ -14,7 +14,7 @@ process.on('uncaughtException', (err) => {
   // Do NOT exit the process – we want the API to stay available.
 });
 
-const app = express();
+export const app = express();
 const scraper = new ScraperService();
 
 app.use(express.json());
@@ -50,6 +50,22 @@ app.post('/api/shoe-image', async (req, res) => {
   }
 });
 
-app.listen(config.port, () => {
-  logger.info(`Server running on http://localhost:${config.port}`);
-});
+export function startServer(port: number | string = config.port) {
+  const listenPort: number = typeof port === "string" ? parseInt(port, 10) : port;
+  try {
+    return app.listen(listenPort, () => {
+      logger.info(`Server running on http://localhost:${listenPort}`);
+    });
+  } catch (err: any) {
+    if (err.code === "EADDRINUSE") {
+      logger.error(`Port ${listenPort} already in use, reusing existing server.`);
+      return null;
+    }
+    throw err;
+  }
+}
+
+// If executed directly (not imported), start immediately
+if (require.main === module) {
+  startServer();
+}
