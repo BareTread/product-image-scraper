@@ -24,5 +24,14 @@ export const config = {
   barefoot_brands: [
     'vivobarefoot', 'xero shoes', 'be lenka', 'wildling',
     'lems', 'feelgrounds', 'freet', 'bohempia', 'groundies'
-  ]
+  ],
+  scraperService: {
+    downloadMaxRetries: parseInt(process.env.SCRAPER_DOWNLOAD_MAX_RETRIES || "3", 10),
+    downloadInitialDelayMs: parseInt(process.env.SCRAPER_DOWNLOAD_INITIAL_DELAY_MS || "1000", 10),
+    downloadTimeoutMs: parseInt(process.env.SCRAPER_DOWNLOAD_TIMEOUT_MS || "10000", 10),
+    userAgent: process.env.SCRAPER_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (Compatible; ShoeImageAPI/1.0; +http://example.com/bot)',
+    geminiMaxRetries: parseInt(process.env.SCRAPER_GEMINI_MAX_RETRIES || "2", 10),
+    geminiInitialDelayMs: parseInt(process.env.SCRAPER_GEMINI_INITIAL_DELAY_MS || "1000", 10),
+    bypassGeminiOnFailure: (process.env.SCRAPER_BYPASS_GEMINI_ON_FAILURE || "false").toLowerCase() === "true",
+  }
 };
