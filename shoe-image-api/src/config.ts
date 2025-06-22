@@ -33,5 +33,13 @@ export const config = {
     geminiMaxRetries: parseInt(process.env.SCRAPER_GEMINI_MAX_RETRIES || "2", 10),
     geminiInitialDelayMs: parseInt(process.env.SCRAPER_GEMINI_INITIAL_DELAY_MS || "1000", 10),
     bypassGeminiOnFailure: (process.env.SCRAPER_BYPASS_GEMINI_ON_FAILURE || "false").toLowerCase() === "true",
+    search: {
+      timeoutMs: parseInt(process.env.SCRAPER_SEARCH_TIMEOUT_MS || "20000", 10),
+      querySuffix: process.env.SCRAPER_SEARCH_QUERY_SUFFIX || " product photo white background",
+      bingImageSearchUrl: process.env.SCRAPER_BING_IMAGE_SEARCH_URL || "https://www.bing.com/images/search",
+      imageResultsSelector: process.env.SCRAPER_BING_IMAGE_RESULTS_SELECTOR || ".imgpt",
+      pageOperationRetries: parseInt(process.env.SCRAPER_SEARCH_PAGE_OP_RETRIES || "2", 10), // Retries for individual page actions
+      pageOperationInitialDelayMs: parseInt(process.env.SCRAPER_SEARCH_PAGE_OP_DELAY_MS || "500", 10), // Initial delay for page action retries
+    }
   }
 };

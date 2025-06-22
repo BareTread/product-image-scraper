@@ -38,6 +38,32 @@ export class SearchEngineSource implements ImageSource {
     return SearchEngineSource.stagehand!.page;
   }
 
+  private async retryPageOperation<T>(
+    operationDescription: string,
+    fn: () => Promise<T>,
+    maxRetries: number = config.scraperService.search.pageOperationRetries,
+    initialDelay: number = config.scraperService.search.pageOperationInitialDelayMs
+  ): Promise<T> {
+    let currentDelay = initialDelay;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.debug(`Attempt ${attempt}/${maxRetries} for page operation: ${operationDescription}`);
+        return await fn();
+      } catch (error: any) {
+        logger.warn(`Page operation "${operationDescription}" attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+        if (attempt === maxRetries) {
+          logger.error(`All ${maxRetries} attempts for page operation "${operationDescription}" failed.`);
+          throw error; // Re-throw the last error to be caught by the main searchImage catch block
+        }
+        await new Promise(resolve => setTimeout(resolve, currentDelay));
+        currentDelay *= 2; // Exponential backoff
+      }
+    }
+    // Should be unreachable if maxRetries >= 1, as fn() will be called or error thrown.
+    // Adding a fallback throw for type safety and unexpected scenarios.
+    throw new Error(`Retry loop for "${operationDescription}" completed without success or error.`);
+  }
+
   // Simple promise-based mutex to serialize Page usage
   private async withLock<T>(fn: () => Promise<T>): Promise<T> {
     const prev = SearchEngineSource.mutex;
@@ -54,22 +80,36 @@ export class SearchEngineSource implements ImageSource {
   async searchImage(query: string): Promise<string[]> {
     return this.withLock(async () => {
       try {
-            const page = await this.getBrowserPage();
-      const timeout = 20000; // 20 seconds
+        const page = await this.getBrowserPage();
+        const searchConfig = config.scraperService.search;
+        const searchQuery = `${query}${searchConfig.querySuffix}`;
 
-      logger.debug('Navigating to Bing Images...');
-            await page.goto('https://www.bing.com/images/search', { timeout });
+        await this.retryPageOperation(
+          `Navigate to ${searchConfig.bingImageSearchUrl}`,
+          () => page.goto(searchConfig.bingImageSearchUrl, { timeout: searchConfig.timeoutMs })
+        );
 
-      logger.debug(`Searching for: ${query} product photo white background`);
-                  await page.act(`type "${query} product photo white background" in the search bar`);
-                  await page.act('press Enter');
+        await this.retryPageOperation(
+          `Type search query: "${searchQuery}"`,
+          () => page.act(`type "${searchQuery}" in the search bar`)
+          // Note: page.act does not have its own timeout, it relies on Stagehand's internal timeouts/logic.
+          // If specific timeout needed for act, Stagehand API or custom promise timeout would be required.
+        );
 
-      logger.debug('Waiting for image results to load...');
-      // Wait for the results container to be visible
-            await page.waitForSelector('.imgpt', { timeout });
+        await this.retryPageOperation(
+          `Press Enter after typing query`,
+          () => page.act('press Enter')
+        );
 
-      logger.debug('Extracting image URLs from search results...');
-      const imageUrls = await page.evaluate(() => {
+        await this.retryPageOperation(
+          `Wait for image results selector: ${searchConfig.imageResultsSelector}`,
+          () => page.waitForSelector(searchConfig.imageResultsSelector, { timeout: searchConfig.timeoutMs })
+        );
+
+        logger.debug('Extracting image URLs from search results...');
+        // page.evaluate is less likely to need retries unless the page structure is unexpectedly missing.
+        // If it fails, it's usually a selector issue within the evaluate, caught by the main try/catch.
+        const imageUrls = await page.evaluate(() => {
         const imageElements = Array.from(document.querySelectorAll('a.iusc')) as HTMLAnchorElement[];
         const urls = imageElements.map(el => {
           const m = el.getAttribute('m');
@@ -86,10 +126,16 @@ export class SearchEngineSource implements ImageSource {
 
       logger.debug(`Extracted ${imageUrls.length} image URLs.`);
       return imageUrls;
-    } catch (error) {
-      logger.error('An error occurred during Bing image search:', error);
+    } catch (error: any) {
+      // Log the specific error that led to the reset, including the query
+      logger.error(
+        `Critical error during Bing image search for query "${query}", triggering Stagehand reset. Error: ${error.message}`,
+        { error, query } // Pass error object and query for structured logging if supported
+      );
       // Attempt recovery: reset browser so next call re-inits
+      logger.info(`Attempting to reset Stagehand for query "${query}" due to critical error...`);
       await this.resetStagehand();
+      logger.info(`Stagehand reset completed for query "${query}".`);
       return [];
     }
 
