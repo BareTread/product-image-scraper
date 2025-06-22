@@ -26,6 +26,12 @@ export class ImageProcessorService {
 
         let image = sharp(imageBuffer); // By default, sharp does not include EXIF data from the input
 
+    // If Gemini determined the image should be rotated, do that first (90° clockwise)
+    if (geminiResult.rotate) {
+      logger.debug(`Rotating image 90° clockwise as requested by Gemini.`);
+      image = image.rotate(90, { background: { r: 255, g: 255, b: 255, alpha: 1 } });
+    }
+
     // 2. Apply a random transformation
     const transformationType = Math.floor(Math.random() * 3); // 0, 1, or 2
 
@@ -57,8 +63,10 @@ export class ImageProcessorService {
         Artist: 'BareTread',
         ImageDescription: `Official product photo of ${geminiResult.brand} ${geminiResult.model}`,
       },
-      ExifIFD: {
-        UserComment: JSON.stringify({ keywords: geminiResult.keywords }),
+      Exif: {
+        UserComment: (geminiResult.keywords && geminiResult.keywords.length > 0)
+          ? geminiResult.keywords.join(', ')
+          : `${geminiResult.brand}, ${geminiResult.model}`,
       },
     };
 

@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import ExifReader from 'exifreader';
+import { BrowserFactory } from './sources/browser.factory';
 
 let srv: Server | null;
 
@@ -19,8 +20,8 @@ const testModels = [
   'Whitin Barefoot Cross-Trainer' // Whitin
 ];
 
-async function runTests() {
-  const BASE_PORT = srv ? (srv.address() as any).port : 3000;
+async function runTests(server: Server): Promise<number> {
+  const BASE_PORT = (server.address() as any).port;
   console.log(`🧪 Starting API Test Suite on port ${BASE_PORT}...\n`);
   let successes = 0;
   let failures = 0;
@@ -69,30 +70,49 @@ async function runTests() {
   console.log(`❌ Failures: ${failures}`);
   console.log(`---------------------\n`);
 
-  // Cleanup generated images
-  console.log('🧹 Cleaning up generated images...');
-  const imageDir = path.join(__dirname, '..', 'public', 'images');
-  const files = fs.readdirSync(imageDir);
-  let cleanedFiles = 0;
-  for (const file of files) {
-    if (file !== 'index.json' && file !== '.gitkeep') { // Don't delete index or placeholder
-      fs.unlinkSync(path.join(imageDir, file));
-      cleanedFiles++;
+  return failures;
+}
+
+async function main() {
+  const browserFactory = BrowserFactory.getInstance();
+  const server = await new Promise<Server>(resolve => {
+    const s = startServer(0, () => resolve(s));
+  });
+
+  let failures = 0;
+  try {
+    console.log('Initializing browser...');
+    await browserFactory.init();
+    console.log('Browser initialized.');
+    failures = await runTests(server);
+  } catch (e) {
+    console.error('Test suite failed with an unhandled exception:', e);
+    failures = 1;
+  } finally {
+    server.close();
+    await browserFactory.close();
+
+    // Cleanup generated images
+    console.log('🧹 Cleaning up generated images...');
+    const imageDir = path.join(__dirname, '..', 'public', 'images');
+    const files = fs.readdirSync(imageDir);
+    let cleanedFiles = 0;
+    for (const file of files) {
+      if (file !== 'index.json' && file !== '.gitkeep') {
+        fs.unlinkSync(path.join(imageDir, file));
+        cleanedFiles++;
+      }
     }
-  }
-  console.log(`🗑️  Removed ${cleanedFiles} image(s).\n`);
+    console.log(`🗑️  Removed ${cleanedFiles} image(s).\n`);
 
-  // Gracefully close the Express server after tests
-  if (srv) srv.close();
-
-  // Exit with error code if any tests failed
-  if (failures > 0) {
-    console.log('Exiting with error code 1 due to test failures.');
-    process.exit(1);
-  } else {
-    process.exit(0);
+    if (failures > 0) {
+      console.log(`Exiting with error code 1 due to ${failures} test failure(s).`);
+      process.exit(1);
+    } else {
+      console.log('All tests passed!');
+      process.exit(0);
+    }
   }
 }
 
-// Start the server and trigger the tests via the onListen callback
-srv = startServer(0, runTests);
+main();

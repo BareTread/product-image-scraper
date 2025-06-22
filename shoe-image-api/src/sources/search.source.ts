@@ -60,13 +60,14 @@ export class SearchEngineSource implements ImageSource {
       logger.debug('Navigating to Bing Images...');
             await page.goto('https://www.bing.com/images/search', { timeout });
 
-      logger.debug(`Searching for: ${query} product photo white background`);
-                  await page.act(`type "${query} product photo white background" in the search bar`);
+      logger.debug(`Searching for: ${query}`);
+                  await page.act(`type "${query}" in the search bar`);
                   await page.act('press Enter');
 
       logger.debug('Waiting for image results to load...');
-      // Wait for the results container to be visible
-            await page.waitForSelector('.imgpt', { timeout });
+      // Wait for the image results container to ensure images are loaded.
+    // We target 'a.iusc' as it's the specific element containing the image data.
+    await page.waitForSelector('a.iusc', { timeout });
 
       logger.debug('Extracting image URLs from search results...');
       const imageUrls = await page.evaluate(() => {

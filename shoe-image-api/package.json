@@ -15,10 +15,12 @@
   "dependencies": {
     "@browserbasehq/stagehand": "^2.3.1",
     "@google/generative-ai": "^0.24.1",
+    "async-mutex": "^0.5.0",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "sharp": "^0.33.4",
+    "tslib": "^2.8.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {

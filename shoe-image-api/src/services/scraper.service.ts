@@ -1,23 +1,27 @@
 import axios from 'axios';
 import { ImageSource, ScrapingResult } from '../types';
 import { CacheService } from './cache.service';
-import { ValidatorService } from './validator.service';
+
 import { GeminiValidatorService } from './gemini-validator.service';
 import { ImageProcessorService } from './image-processor.service';
 import { SearchEngineSource } from '../sources/search.source';
+import { GoogleShoppingSource } from '../sources/google-shopping.source';
 import { logger } from '../utils/logger';
 
 export class ScraperService {
-  private source: ImageSource;
+  private sources: ImageSource[];
   private cache: CacheService;
-  private validator: ValidatorService;
+
     private geminiValidator: GeminiValidatorService;
   private imageProcessor: ImageProcessorService;
 
   constructor() {
-    this.source = new SearchEngineSource();
+    this.sources = [
+      new GoogleShoppingSource(),
+      new SearchEngineSource(),
+    ];
     this.cache = new CacheService();
-    this.validator = new ValidatorService();
+
         this.geminiValidator = new GeminiValidatorService();
     this.imageProcessor = new ImageProcessorService();
   }
@@ -31,19 +35,21 @@ export class ScraperService {
       return { success: true, localPath: cachedPath, source: 'cache' };
     }
 
-    logger.info(`No cache entry for "${model}". Starting scrape using ${this.source.name}...`);
-    try {
-      const urls = await this.source.searchImage(model);
-      logger.info(`Source "${this.source.name}" found ${urls.length} potential URLs.`);
+    logger.info(`No cache entry for "${model}". Starting scrape across ${this.sources.length} source(s)...`);
+    for (const source of this.sources) {
+      try {
+        const urls = await source.searchImage(model);
+        logger.info(`Source "${source.name}" found ${urls.length} potential URLs.`);
 
-      for (const url of urls) {
-        const result = await this.downloadAndValidate(url, model, this.source.name);
-        if (result.success) {
-          return result;
+        for (const url of urls) {
+          const result = await this.downloadAndValidate(url, model, source.name);
+          if (result.success) {
+            return result;
+          }
         }
+      } catch (error) {
+        logger.error(`Source ${source.name} threw an error:`, error);
       }
-    } catch (error) {
-      logger.error(`Source ${this.source.name} threw an error:`, error);
     }
 
     return { success: false, error: 'No valid product image found from any source.' };
@@ -54,35 +60,31 @@ export class ScraperService {
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 10000,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       });
       const imageBuffer = Buffer.from(response.data);
 
-      const borderOk = await this.validator.validateImage(imageBuffer);
-
-      if (!borderOk) {
-        logger.debug(`Image from ${url} failed validation.`);
-        return { success: false, error: 'Image failed validation' };
-      }
-
-      // Second-tier validation with Gemini (semantic check)
-            const geminiResult = await this.geminiValidator.validateImage(
+      // Unified validation: this now checks for white background AND runs Gemini validation.
+      const geminiResult = await this.geminiValidator.validateImage(
         imageBuffer,
         model
       );
-            if (!geminiResult) {
-        logger.debug(`Gemini rejected image from ${url}`);
-        return { success: false, error: 'LLM validation failed' };
+
+      logger.debug(`Gemini validation result for ${url}:`, geminiResult);
+
+      if (!geminiResult) {
+        logger.debug(`Image from ${url} failed validation (background or Gemini).`);
+        return { success: false, error: 'Image failed validation' };
       }
 
-            // Process the image to make it unique for SEO
-            const processedBuffer = await this.imageProcessor.makeUnique(
+      // Process the image to make it unique for SEO
+      const processedBuffer = await this.imageProcessor.makeUnique(
         imageBuffer,
         geminiResult
       );
 
-            const localPath = this.cache.saveImage(geminiResult, processedBuffer);
-            logger.info(
+      const localPath = this.cache.saveImage(geminiResult, processedBuffer);
+      logger.info(
         `SUCCESS: Valid image for "${geminiResult.model}" found via ${sourceName} and cached.`
       );
       return { success: true, imageUrl: url, localPath, source: sourceName };
