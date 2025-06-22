@@ -41,6 +41,7 @@ app.post('/api/shoe-image', async (req, res) => {
         success: true,
         model,
         source: result.source,
+        rawUrl: result.imageUrl,
         imageUrl: `${req.protocol}://${req.get('host')}${result.localPath}`,
         localPath: result.localPath // Add this line
       });
